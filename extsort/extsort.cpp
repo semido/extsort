@@ -33,7 +33,7 @@ static int createSortedPieces(
 {
   File f(input, "rb"s);
   size_t fileSize = f.size(); // Bytes.
-  size_t pieces = std::ceil(double(fileSize) / (memSize / numThreads));
+  size_t pieces = size_t(std::ceil(double(fileSize) / (memSize / numThreads)));
   size_t bufSize = (fileSize / sizeof(Data)) / pieces + 1; // Numbers.
   std::cout << "file size = " << fileSize << "(" << double(fileSize) / (1024.0 * 1024.0) << "M),";
   std::cout << " mem size = " << memSize << "(" << double(memSize) / (1024.0 * 1024.0) << "M),";
@@ -129,7 +129,7 @@ void externalSortNPasses(
 )
 {
   auto nFiles = createSortedPieces(input, memSize, numThreads);
-  if (numPasses == 0 || numPasses * 2 >= nFiles)
+  if (numPasses <= 1 || numPasses >= nFiles)
     externalMerge(output, nFiles, 0);
   else
     externalMerge(output, nFiles, nFiles / numPasses + 1);

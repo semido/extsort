@@ -2,6 +2,7 @@
 #include "file.hpp"
 #include <vector>
 #include <climits>
+#include <iostream>
 
 template<class Data>
 class MinHeap
@@ -76,7 +77,7 @@ void mergeFiles(const std::string& output, const std::vector<int>& ids)
     std::vector<File> ins; // Input files, sorted pieces.
 #endif
     ins.reserve(ids.size());
-    MinHeap<Data> heap(ids.size());
+    MinHeap<Data> heap(int(ids.size()));
     for (int i = 0; i < ids.size(); i++) {
 #ifdef BUFFERED_READ
       ins.emplace_back(std::to_string(ids[i]));
@@ -97,16 +98,19 @@ void mergeFiles(const std::string& output, const std::vector<int>& ids)
 
     for (int finished = 0; finished < ids.size(); ) {
       auto& top = heap[0];
-      if (top.i == INT_MAX)
+      if (ins.size() <= top.i)
         break;
       buf.push_back(top.data);
-      if (ins.size() <= top.i || !ins[top.i].read(top.data)) {
+      if (!ins[top.i].read(top.data)) {
         top.data = maxData;
         top.i = INT_MAX;
         finished++;
       }
       heap.heapify(0);
     }
+
+    if (buf.wasResized())
+      std::cout << "Warning: FileWriteBuf resized its buffer to: " << buf.wasResized() << "\n";
   }
   for (auto id : ids)
     std::remove(std::to_string(id).data());

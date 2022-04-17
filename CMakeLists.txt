@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.9)
 
 # External sort demo project.
 project(extsort CXX)

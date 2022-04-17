@@ -3,6 +3,10 @@
 #include <string>
 using namespace std::string_literals;
 #include <vector>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 class File
 {
@@ -73,7 +77,7 @@ public:
   }
 };
 
-// helper for std::vector<NoInit<?>>
+// Helper for std::vector<NoInit<T>>
 template<class T>
 class NoInit {
 public:
@@ -84,34 +88,193 @@ private:
   T value;
 };
 
+// Double buffered write.
+// Main thread is collecting.
+// Additional thread is to flush into the file.
+// TODO: list<bufs>
 template<class T>
 class FileWriteBuf
 {
 public:
-  FileWriteBuf(const std::string& name, size_t sz = 256) : file(name, "wb"s) { buf.reserve(sz); }
-  ~FileWriteBuf() { writeBuf(); }
+
+  FileWriteBuf(const std::string& name, size_t sz = 256*1024) :
+    file(name, "wb"s),
+    t(&FileWriteBuf::run, this)
+  {
+    buf.reserve(sz);
+    bufWrite.reserve(sz);
+  }
+
+  ~FileWriteBuf()
+  {
+    {
+      std::unique_lock<std::mutex> lock(m);
+      cv.wait(lock, [this] { return ! doFlush; });
+    }
+    isTerminating = true;
+    swap();
+    t.join();
+  }
+
   void push_back(const T x)
   {
+    bool resized = buf.size() == buf.capacity();
     buf.push_back(x);
-    if (buf.size() == buf.capacity())
-      writeBuf();
+    if (! resized && 2 * buf.size() < buf.capacity())
+      return;
+    {
+      std::lock_guard<std::mutex> lock(m);
+      if (doFlush) {
+        if (resized)
+          maxCapacity = std::max(maxCapacity, buf.capacity());
+        return;
+      }
+    }
+    swap();
   }
+
+  auto wasResized() const { return maxCapacity; }
+
 private:
-  File file;
-  std::vector<NoInit<T>> buf;
-  size_t bufpos = 0;
-  void writeBuf()
+
+  void run()
   {
-    file.write(buf);
-    buf.clear();
-  };
+    while (true) {
+      {
+        std::unique_lock<std::mutex> lock(m);
+        cv.wait(lock, [this] { return doFlush; });
+      }
+      if (bufWrite.size()) {
+        file.write(bufWrite);
+        bufWrite.clear();
+      }
+      {
+        std::lock_guard<std::mutex> lock(m);
+        doFlush = false;
+        if (isTerminating)
+          break;
+      }
+      cv.notify_all(); // NB: dtor may wait it.
+    }
+  }
+
+  void swap()
+  {
+    {
+      std::lock_guard<std::mutex> lock(m);
+      std::swap(buf, bufWrite);
+      doFlush = true;
+    }
+    cv.notify_one(); // Flushing thread waits it.
+  }
+
+  File file;
+
+  std::thread t;
+  std::mutex m;
+  std::condition_variable cv;
+  bool doFlush = false;
+  bool isTerminating = false;
+  size_t maxCapacity = 0;
+
+  std::vector<NoInit<T>> buf; // Collect by push_back.
+  std::vector<NoInit<T>> bufWrite; // Write it to file.
 };
 
+// Double buffered read.
+// Main thread is read from buf. Additional thread is to load bufs from the file.
 template<class T>
 class FileReadBuf
 {
 public:
-  FileReadBuf(const std::string& name, size_t sz = 256) : file(name, "rb"s) { buf.reserve(sz); }
+
+  FileReadBuf(const std::string& name, size_t sz = 256 * 1024) :
+    file(name, "rb"s),
+    t(&FileReadBuf::run, this),
+    isEOF(false)
+  {
+    buf.reserve(sz);
+    buf2.reserve(sz);
+    setLoad(true);
+  }
+
+  FileReadBuf(const FileReadBuf&) {}
+
+  ~FileReadBuf()
+  {
+    {
+      std::lock_guard<std::mutex> lock(m);
+      isEOF = true;
+    }
+    cv.notify_one();
+    t.join();
+  }
+
+  bool read(T& x)
+  {
+    if (bufpos >= buf.size()) {
+      if (isEOF)
+        return false;
+      wait([this] { return !doLoad; });
+      buf.clear();
+      bufpos = 0;
+      if (isEOF)
+        return false;
+      std::swap(buf, buf2);
+      setLoad(true);
+    }
+    x = buf[bufpos++];
+    return true;
+  }
+
+private:
+  template <class Pred>
+  void wait(Pred pred)
+  {
+    std::unique_lock<std::mutex> lock(m);
+    cv.wait(lock, pred);
+  }
+  void setLoad(bool b)
+  {
+    {
+      std::lock_guard<std::mutex> lock(m);
+      doLoad = b;
+    }
+    cv.notify_one();
+  }
+  void run()
+  {
+    while (true)
+    {
+      wait([this] { return doLoad || isEOF; });
+      if (isEOF)
+        break;
+      buf2.resize(buf2.capacity());
+      buf2.resize(file.read(buf2));
+      if (buf2.size() == 0)
+        isEOF = true;
+      setLoad(false);
+    }
+  }
+
+  File file;
+
+  std::thread t;
+  std::mutex m;
+  std::condition_variable cv;
+  bool doLoad = false;
+  std::atomic<bool> isEOF;
+
+  size_t bufpos = 0;
+  std::vector<NoInit<T>> buf;
+  std::vector<NoInit<T>> buf2;
+};
+
+template<class T>
+class FileReadBuf0
+{
+public:
+  FileReadBuf0(const std::string& name, size_t sz = 256) : file(name, "rb"s) { buf.reserve(sz); }
   bool read(T& x)
   {
     if (bufpos >= buf.size()) {

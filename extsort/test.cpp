@@ -11,16 +11,20 @@ void generateSortedFile(const std::string& name, size_t size)
   for (size_t i = 0; i < size; i++) {
     buf.push_back(Data(i));
   }
+  if (buf.wasResized())
+    std::cout << "Warning: FileWriteBuf resized its buffer to: " << buf.wasResized() << "\n";
 }
 
 void generateFile1(const std::string& name, size_t size)
 {
   FileWriteBuf<Data> buf(name);
-  srand(time(0));
+  srand(unsigned(time(0)));
   for (size_t i = 0; i < size; i++) {
     Data x = (Data(rand()) << 16) + rand();
     buf.push_back(x);
   }
+  if (buf.wasResized())
+    std::cout << "Warning: FileWriteBuf resized its buffer to: " << buf.wasResized() << "\n";
 }
 
 template< class Data, class Compare>
