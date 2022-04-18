@@ -1,6 +1,7 @@
 #include "extsort/cmd.hpp"
 #include "extsort/extsort.hpp"
 #include "extsort/test.hpp"
+#include "extsort/timer.hpp"
 #include <thread>
 #include <iostream>
 #include <string>
@@ -50,10 +51,12 @@ int main(int argc, const char* argv[])
       int numPasses = std::stoi(cmd.get_option("-p"));
       externalSortNPasses(testName, resultName, memSize, numThreads, numPasses);
     }
-    else {
-      int numSlots = std::stoi(cmd.get_option("-s", "0"));
+    else if (cmd.exists_option("-s")) {
+      int numSlots = std::stoi(cmd.get_option("-s"));
       externalSort(testName, resultName, memSize, numThreads, numSlots);
     }
+    else
+      externalSortNPasses(testName, resultName, memSize, numThreads, 0);
     std::cout << "External sort: " << timer << "sec\n";
   }
 

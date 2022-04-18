@@ -1,4 +1,5 @@
 #pragma once
+#include "timer.hpp"
 #include <cstdio>
 #include <string>
 using namespace std::string_literals;
@@ -42,7 +43,7 @@ public:
       std::fclose(fp);
     fp = nullptr;
   }
-  auto size()
+  size_t size()
   {
     auto pos = std::ftell(fp);
     std::fseek(fp, 0, SEEK_END);
@@ -122,6 +123,7 @@ public:
     buf.push_back(x);
     if (! resized && 2 * buf.size() < buf.capacity())
       return;
+    Timer timer;
     {
       std::lock_guard<std::mutex> lock(m);
       if (doFlush) {
@@ -131,9 +133,12 @@ public:
       }
     }
     swap();
+    mainThreadWaits += timer;
   }
 
   auto wasResized() const { return maxCapacity; }
+
+  auto mainWaits() const { return mainThreadWaits; }
 
 private:
 
@@ -176,6 +181,7 @@ private:
   bool doFlush = false;
   bool isTerminating = false;
   size_t maxCapacity = 0;
+  double mainThreadWaits = 0.0;
 
   std::vector<NoInit<T>> buf; // Collect by push_back.
   std::vector<NoInit<T>> bufWrite; // Write it to file.
@@ -210,22 +216,31 @@ public:
     t.join();
   }
 
+  size_t size() { return file.size(); }
+
   bool read(T& x)
   {
     if (bufpos >= buf.size()) {
       if (isEOF)
         return false;
-      wait([this] { return !doLoad; });
+      Timer timer;
+      std::unique_lock<std::mutex> lock(m);
+      cv.wait(lock, [this] { return !doLoad; });
+      //lock.unlock();
       buf.clear();
       bufpos = 0;
       if (isEOF)
         return false;
       std::swap(buf, buf2);
+      lock.unlock();
       setLoad(true);
+      mainThreadWaits += timer;
     }
     x = buf[bufpos++];
     return true;
   }
+
+  auto mainWaits() const { return mainThreadWaits; }
 
 private:
   template <class Pred>
@@ -246,9 +261,11 @@ private:
   {
     while (true)
     {
-      wait([this] { return doLoad || isEOF; });
+      std::unique_lock<std::mutex> lock(m);
+      cv.wait(lock, [this] { return doLoad || isEOF; });
       if (isEOF)
         break;
+      lock.unlock();
       buf2.resize(buf2.capacity());
       buf2.resize(file.read(buf2));
       if (buf2.size() == 0)
@@ -264,33 +281,9 @@ private:
   std::condition_variable cv;
   bool doLoad = false;
   std::atomic<bool> isEOF;
+  double mainThreadWaits = 0.0;
 
   size_t bufpos = 0;
   std::vector<NoInit<T>> buf;
   std::vector<NoInit<T>> buf2;
-};
-
-template<class T>
-class FileReadBuf0
-{
-public:
-  FileReadBuf0(const std::string& name, size_t sz = 256) : file(name, "rb"s) { buf.reserve(sz); }
-  bool read(T& x)
-  {
-    if (bufpos >= buf.size()) {
-      buf.resize(buf.capacity());
-      auto sz = file.read(buf);
-      bufpos = 0;
-      buf.resize(sz);
-      if (sz == 0)
-        return false;
-    }
-    x = buf[bufpos++];
-    return true;
-  }
-
-private:
-  File file;
-  std::vector<NoInit<T>> buf;
-  size_t bufpos = 0;
 };

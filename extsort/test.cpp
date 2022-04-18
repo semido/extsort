@@ -25,6 +25,7 @@ void generateFile1(const std::string& name, size_t size)
   }
   if (buf.wasResized())
     std::cout << "Warning: FileWriteBuf resized its buffer to: " << buf.wasResized() << "\n";
+  std::cout << "FileWriteBuf was waiting: " << buf.mainWaits() << "sec.\n";
 }
 
 template< class Data, class Compare>
@@ -68,26 +69,18 @@ bool makeTest(const std::string& origName, const std::string& resName)
   try
   {
     size_t bufSize = fileSize / sizeof(Data);
-    auto* buf = new Data[bufSize];
-    forig.read(buf, bufSize);
-    std::sort(buf, buf + bufSize);
+    std::vector<NoInit<Data>> buf(bufSize);
+    forig.read(buf);
+    std::sort(buf.begin(), buf.end());
 
-    File fres(resName, "rb"s);
+    FileReadBuf<Data> fres(resName);
     if (fileSize != fres.size())
       return false;
-    std::vector<Data> smallBuf(256);
-    for (size_t i = 0; fres && i < bufSize;) {
-      auto sz = fres.read(smallBuf);
-      if (0 != std::memcmp(
-        reinterpret_cast<const char*>(buf + i),
-        reinterpret_cast<const char*>(smallBuf.data()),
-        sz * sizeof(Data))) {
-        delete buf;
+    Data x;
+    for (size_t i = 0; i < bufSize; i++) {
+      if (!fres.read(x) || x != buf[i])
         return false;
-      }
-      i += sz;
     }
-    delete buf;
     return true;
   }
   catch (const std::bad_alloc&)

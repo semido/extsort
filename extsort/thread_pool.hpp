@@ -1,5 +1,5 @@
 #pragma once
-
+#include "timer.hpp"
 #include <thread>
 #include <atomic>
 #include <mutex>
@@ -65,6 +65,8 @@ class ThreadPool
   std::vector<Thread<Data, Function>> datas;
   std::vector<std::thread> threads;
 
+  double mainThreadWaits = 0.0;
+
 public:
 
   ThreadPool(int sz, Function f)
@@ -83,8 +85,11 @@ public:
     terminate();
   }
 
+  auto mainWaits() const { return mainThreadWaits; }
+
   auto& waitFree()
   {
+    Timer t;
     int tid = -1;
     wait([this, &tid] {
       int busy = 0;
@@ -96,6 +101,7 @@ public:
       //std::cout << "busy " << busy << "\n";
       return tid != -1;
       });
+    mainThreadWaits += t;
     return datas[tid];
   }
 

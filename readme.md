@@ -32,5 +32,6 @@ By default mem limit is 128M, input file is 'input' located in the dir of execut
    * -m N : limit the memory with number of elements;
    * -t N : limit number of available of threads;
    * -p N : define number of merge passes;
+   * -p 0 : start external sort with multithread merge; this is default mode now;
    * -s N : define number of merge slots, i.e. how many files are opened for merge.
 
